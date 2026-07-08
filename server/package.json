@@ -1,0 +1,25 @@
+{
+  "name": "easil-server",
+  "version": "1.0.0",
+  "description": "Self-hosted backend for EASIL (replaces Base44). Node/Express + Postgres + Groq.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "migrate": "node src/migrate.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.8.0",
+    "multer": "^2.0.1",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.13.1",
+    "ws": "^8.21.0"
+  }
+}
