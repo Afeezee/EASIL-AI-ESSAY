@@ -86,7 +86,8 @@ export default function InstructorUpload() {
                 throw new Error("Failed to extract content from the uploaded file");
             }
         } catch (err) {
-            setError("Failed to upload or extract content from file. Please try again.");
+            const message = err?.message || 'Unknown upload error';
+            setError(`Upload failed: ${message}`);
             console.error("Upload error:", err);
         }
 

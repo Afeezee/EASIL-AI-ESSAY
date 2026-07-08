@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import multer from 'multer';
 
 import { runMigrations, pool } from './db.js';
 import { attachUser } from './auth.js';
@@ -22,6 +23,7 @@ const origins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
 app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
 
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(attachUser);
 
 // Serve uploaded files so file_url is publicly fetchable.

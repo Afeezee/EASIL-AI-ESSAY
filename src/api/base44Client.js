@@ -29,8 +29,8 @@ function clearSession() {
     localStorage.removeItem(USER_KEY);
 }
 
-async function request(pathname, { method = 'GET', body, isForm = false } = {}) {
-    const headers = {};
+async function request(pathname, { method = 'GET', body, isForm = false, headers: extraHeaders } = {}) {
+    const headers = { ...(extraHeaders || {}) };
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -38,8 +38,8 @@ async function request(pathname, { method = 'GET', body, isForm = false } = {}) 
     if (isForm) {
         payload = body; // FormData: let the browser set the multipart boundary.
     } else if (body !== undefined) {
-        headers['Content-Type'] = 'application/json';
-        payload = JSON.stringify(body);
+        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        payload = typeof body === 'string' ? body : JSON.stringify(body);
     }
 
     const res = await fetch(`${API_URL}${pathname}`, { method, headers, body: payload });
@@ -47,10 +47,14 @@ async function request(pathname, { method = 'GET', body, isForm = false } = {}) 
     if (res.status === 204) return null;
 
     const text = await res.text();
-    const data = text ? JSON.parse(text) : null;
+    let data = null;
+    if (text) {
+        try { data = JSON.parse(text); }
+        catch { data = { raw: text }; }
+    }
 
     if (!res.ok) {
-        const message = (data && (data.error || data.message)) || `Request failed (${res.status})`;
+        const message = (data && (data.error || data.message || data.raw)) || `Request failed (${res.status})`;
         const err = new Error(message);
         err.status = res.status;
         throw err;
