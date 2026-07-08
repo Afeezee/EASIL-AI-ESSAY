@@ -8,8 +8,9 @@
 // Because this file preserves that shape, api/entities.js, api/integrations.js and every
 // page keep working unchanged — only the backend behind them has changed.
 
-const defaultApiUrl = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-    ? window.location.origin
+const isLocalHost = (hostname) => ['localhost', '127.0.0.1', '::1'].includes(hostname);
+const defaultApiUrl = typeof window !== 'undefined' && !isLocalHost(window.location.hostname)
+    ? ''
     : 'http://localhost:4000';
 const API_URL = (import.meta.env.VITE_API_URL || defaultApiUrl).replace(/\/$/, '');
 const TOKEN_KEY = 'easil_token';
@@ -42,7 +43,8 @@ async function request(pathname, { method = 'GET', body, isForm = false, headers
         payload = typeof body === 'string' ? body : JSON.stringify(body);
     }
 
-    const res = await fetch(`${API_URL}${pathname}`, { method, headers, body: payload });
+    const requestUrl = API_URL ? `${API_URL}${pathname}` : pathname;
+    const res = await fetch(requestUrl, { method, headers, body: payload });
 
     if (res.status === 204) return null;
 
@@ -54,7 +56,10 @@ async function request(pathname, { method = 'GET', body, isForm = false, headers
     }
 
     if (!res.ok) {
-        const message = (data && (data.error || data.message || data.raw)) || `Request failed (${res.status})`;
+        let message = (data && (data.error || data.message || data.raw)) || `Request failed (${res.status})`;
+        if (res.status === 404 && pathname.startsWith('/api/') && !API_URL) {
+            message = 'API endpoint not found. Set VITE_API_URL to your deployed backend URL.';
+        }
         const err = new Error(message);
         err.status = res.status;
         throw err;
