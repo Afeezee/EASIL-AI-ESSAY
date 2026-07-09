@@ -1,8 +1,10 @@
-// Vercel serverless entry for the EASIL backend.
+// Vercel serverless catch-all for the EASIL backend.
 //
-// The whole Express app (server/src/app.js) is exported as a single function.
-// vercel.json rewrites every /api/* request to this function, so Express sees
-// the original path (e.g. /api/integrations/upload) and routes it normally.
+// This file name ([...path].js) is Vercel's optional catch-all convention: it
+// receives EVERY request under /api/* (e.g. /api/integrations/upload,
+// /api/entities/Quiz, /api/health) via filesystem routing — no rewrite needed,
+// and req.url preserves the full original path so the Express app routes it
+// exactly as it does locally.
 //
 // Required Vercel environment variables (Project Settings -> Environment Variables):
 //   DATABASE_URL   - Neon/Postgres connection string
