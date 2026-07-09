@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
+import { handleUpload } from '@vercel/blob/client';
 import { query } from '../db.js';
 import { invokeLLM } from '../services/llm.js';
 import { extractTextFromBuffer } from '../services/pdf.js';
@@ -11,11 +12,55 @@ import { gradeShortAnswers, gradeEssay } from '../services/grading.js';
 // request body at ~4.5MB, so keep the limit under that.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 const supportedExtensions = ['.pdf', '.doc', '.docx', '.txt', '.md', '.json'];
+const blobContentTypes = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+    'text/markdown',
+    'application/json',
+];
 
 const router = Router();
 
+// POST /api/integrations/blob-token
+// Mints a client-upload token for Vercel Blob. This lets the browser upload the
+// file DIRECTLY to Blob storage, bypassing the ~4.5MB serverless request-body
+// limit. Only active when a Blob store is connected (BLOB_READ_WRITE_TOKEN set).
+router.post('/blob-token', async (req, res) => {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        // Signal "not configured" so the client falls back to multipart upload.
+        return res.status(501).json({ error: 'Blob storage is not configured on this deployment' });
+    }
+    try {
+        const jsonResponse = await handleUpload({
+            request: req,
+            body: req.body,
+            onBeforeGenerateToken: async (pathname) => {
+                const ext = path.extname(pathname).toLowerCase();
+                if (!supportedExtensions.includes(ext)) {
+                    throw new Error(`Unsupported file type: ${ext || 'unknown'}`);
+                }
+                return {
+                    allowedContentTypes: blobContentTypes,
+                    addRandomSuffix: true,
+                    maximumSizeInBytes: 25 * 1024 * 1024,
+                };
+            },
+            // Fires server-to-server after the browser finishes uploading.
+            // No-op here: we extract lazily in /extract so this works on
+            // localhost too (where this callback can't be reached).
+            onUploadCompleted: async () => {},
+        });
+        res.json(jsonResponse);
+    } catch (err) {
+        console.error('[blob-token] error:', err.message);
+        res.status(400).json({ error: err.message });
+    }
+});
+
 // Multer errors (e.g. file too large) arrive as errors on this handler.
-function handleUpload(req, res, next) {
+function handleMultipartUpload(req, res, next) {
     upload.single('file')(req, res, (err) => {
         if (err) {
             const tooBig = err.code === 'LIMIT_FILE_SIZE';
@@ -30,7 +75,7 @@ function handleUpload(req, res, next) {
 // POST /api/integrations/upload  (multipart field: "file")
 // Extracts the text NOW and stores it in Postgres. Returns a file_url that
 // references the stored document by id (no filesystem involved).
-router.post('/upload', handleUpload, async (req, res, next) => {
+router.post('/upload', handleMultipartUpload, async (req, res, next) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded (expected field "file")' });
 
@@ -69,12 +114,47 @@ function documentIdFromUrl(fileUrl) {
     }
 }
 
+// Only fetch text from Vercel Blob's own hosts (SSRF guard).
+function isAllowedBlobUrl(u) {
+    try {
+        const { protocol, host } = new URL(u);
+        return protocol === 'https:' && /\.blob\.vercel-storage\.com$/i.test(host);
+    } catch {
+        return false;
+    }
+}
+
 // POST /api/integrations/extract  { file_url } -> { status, output: { content } }
-// Reads the already-extracted text back from Postgres.
+// Two upload paths converge here:
+//   - Blob client upload: file_url is an https Blob URL -> fetch + extract now.
+//   - Multipart upload:   file_url is /api/integrations/file/<id> -> read the
+//     text already extracted and stored in Postgres.
 router.post('/extract', async (req, res) => {
     try {
         const { file_url } = req.body || {};
         if (!file_url) return res.status(400).json({ status: 'error', error: 'file_url is required' });
+
+        if (/^https?:\/\//i.test(file_url)) {
+            if (!isAllowedBlobUrl(file_url)) {
+                return res.status(400).json({ status: 'error', error: 'Only Vercel Blob URLs are accepted' });
+            }
+            const resp = await fetch(file_url);
+            if (!resp.ok) return res.status(404).json({ status: 'error', error: 'Could not fetch uploaded file' });
+
+            const ext = path.extname(new URL(file_url).pathname).toLowerCase();
+            const buffer = Buffer.from(await resp.arrayBuffer());
+            const content = await extractTextFromBuffer(buffer, ext);
+            if (!content) {
+                return res.status(422).json({ status: 'error', error: 'Could not read any text from this document.' });
+            }
+
+            // Persist so grading/analytics have a record, mirroring the multipart path.
+            await query(
+                `INSERT INTO documents (file_name, file_type, content, created_by) VALUES ($1, $2, $3, $4)`,
+                [path.basename(new URL(file_url).pathname), ext.replace('.', ''), content, req.user?.email || null]
+            );
+            return res.json({ status: 'success', output: { content } });
+        }
 
         const id = documentIdFromUrl(file_url);
         const { rows } = await query('SELECT content FROM documents WHERE id = $1', [id]);

@@ -72,9 +72,22 @@ Steps:
 5. Verify: open `https://<your-app>.vercel.app/api/health` → `{"ok":true}`, then sign up and
    create an assessment.
 
-**Note on upload size:** Vercel caps a serverless request body at ~4.5MB, so uploads are
-limited to 4MB. For larger source documents, either run the backend on a long-lived host
-(Render/Railway/Fly.io) and set `VITE_API_URL` to it, or add Vercel Blob for direct uploads.
+### Uploads & the 4.5MB serverless limit (Vercel Blob)
+
+Vercel caps a serverless request body at ~4.5MB. The app handles this automatically:
+
+- **With Vercel Blob configured**, the browser uploads the file **directly to Blob storage**
+  (no size limit from the function). The backend only mints a short-lived upload token and,
+  on `extract`, fetches the file from Blob and pulls out the text.
+- **Without Blob**, it falls back to a direct multipart upload through the function, capped at
+  4MB.
+
+To enable large uploads on Vercel:
+1. In your Vercel project: **Storage → Create Database → Blob**, and connect it to the project.
+   Vercel automatically injects the `BLOB_READ_WRITE_TOKEN` environment variable.
+2. Redeploy. That's it — the frontend detects Blob is available and uses it; no code change.
+
+Locally (no Blob token) the app just uses the 4MB multipart path, which is fine for dev.
 
 ### Alternative: split hosting
 Prefer the frontend on Vercel and the backend elsewhere? Deploy `server/` to

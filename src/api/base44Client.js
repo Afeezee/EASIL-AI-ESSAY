@@ -124,10 +124,26 @@ const Core = {
     InvokeLLM: ({ prompt, response_json_schema }) =>
         request('/api/integrations/invoke-llm', { method: 'POST', body: { prompt, response_json_schema } }),
 
-    UploadFile: ({ file }) => {
-        const form = new FormData();
-        form.append('file', file);
-        return request('/api/integrations/upload', { method: 'POST', body: form, isForm: true });
+    // Upload strategy:
+    //   1. Try Vercel Blob client-upload — the browser sends the file straight to
+    //      Blob storage, bypassing the serverless ~4.5MB request-body limit.
+    //   2. If Blob isn't configured (endpoint returns 501) or fails, fall back to
+    //      a direct multipart upload to our server (works locally; <=4MB on Vercel).
+    UploadFile: async ({ file }) => {
+        const fileType = (file.name.split('.').pop() || '').toLowerCase();
+        try {
+            const { upload } = await import('@vercel/blob/client');
+            const blob = await upload(file.name, file, {
+                access: 'public',
+                contentType: file.type || undefined,
+                handleUploadUrl: `${API_URL}/api/integrations/blob-token`,
+            });
+            return { file_url: blob.url, file_name: file.name, file_type: fileType };
+        } catch {
+            const form = new FormData();
+            form.append('file', file);
+            return request('/api/integrations/upload', { method: 'POST', body: form, isForm: true });
+        }
     },
 
     ExtractDataFromUploadedFile: ({ file_url, json_schema }) =>
