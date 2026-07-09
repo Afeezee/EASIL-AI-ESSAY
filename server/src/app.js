@@ -1,12 +1,17 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { ensureSchema } from './db.js';
 import { attachUser } from './auth.js';
 import authRoutes from './routes/auth.js';
 import entityRoutes from './routes/entities.js';
 import integrationRoutes from './routes/integrations.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApp() {
     const app = express();
@@ -43,6 +48,19 @@ export function createApp() {
 
     // 404 for unknown API routes.
     app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
+
+    // Single-origin deploys (e.g. Railway): serve the built frontend from the
+    // same server, with SPA fallback. No-op when dist/ is absent (local dev with
+    // a separate Vite server, or split hosting where the frontend lives elsewhere).
+    const distDir = path.resolve(__dirname, '..', '..', 'dist');
+    if (fs.existsSync(distDir)) {
+        app.use(express.static(distDir));
+        app.get('*', (req, res, next) => {
+            if (req.path.startsWith('/api')) return next();
+            res.sendFile(path.join(distDir, 'index.html'));
+        });
+        console.log('[easil-server] serving frontend from', distDir);
+    }
 
     // Central error handler.
     app.use((err, _req, res, _next) => {

@@ -43,6 +43,33 @@ the same `base44.entities / .auth / .integrations` shape, so `api/entities.js`,
 
 ---
 
+## Railway deployment (recommended: one service, frontend + backend)
+
+Railway runs the backend as a normal long-lived Node server — the same
+`node server/src/index.js` that runs locally — and that server also serves the
+built frontend. One service, one origin, no CORS, none of the serverless routing
+quirks. This is the most reliable way to deploy the app.
+
+Steps:
+1. Push this repo to GitHub.
+2. In Railway: **New Project → Deploy from GitHub repo** and pick this repo.
+   `railway.json` already sets the build (`npm run build`) and start (`npm start`)
+   commands, so no manual config is needed.
+3. Add a Postgres database: **New → Database → PostgreSQL** (or keep using Neon).
+4. In the service's **Variables**, set:
+   - `DATABASE_URL` — Railway Postgres URL, or your Neon string
+   - `DATABASE_SSL` — `true` for Neon/managed PG; leave empty for Railway's own PG
+   - `JWT_SECRET` — a long random string
+   - `GROQ_API_KEY` — your Groq key
+   - `GROQ_MODEL` *(optional)* — defaults to `llama-3.3-70b-versatile`
+   - `MAX_UPLOAD_MB` *(optional)* — upload cap; defaults to 25 (Railway has no
+     4.5MB serverless body limit, so large PDFs upload directly — no Blob needed)
+   - Leave `VITE_API_URL` **unset** — the frontend calls same-origin `/api`.
+5. Railway builds and starts the app, then gives you a public URL. Open
+   `<url>/api/health` → `{"ok":true}`, then use the app.
+
+`PORT` is provided by Railway automatically; the server reads it.
+
 ## Vercel deployment (single project: frontend + backend)
 
 Both the frontend **and** the backend deploy from this one repo on Vercel. The Express

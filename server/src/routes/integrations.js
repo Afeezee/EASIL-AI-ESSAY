@@ -8,9 +8,11 @@ import { extractTextFromBuffer } from '../services/pdf.js';
 import { gradeShortAnswers, gradeEssay } from '../services/grading.js';
 
 // In-memory storage: the file never touches disk, so this works identically on
-// a local server and on stateless serverless hosts. Vercel caps a serverless
-// request body at ~4.5MB, so keep the limit under that.
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
+// a local server, a long-lived host (Railway), and stateless serverless hosts.
+// MAX_UPLOAD_MB is configurable: keep it <=4 on Vercel (its serverless body cap
+// is ~4.5MB); a long-lived host like Railway can go much higher.
+const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB) || 25;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 } });
 const supportedExtensions = ['.pdf', '.doc', '.docx', '.txt', '.md', '.json'];
 const blobContentTypes = [
     'application/pdf',
@@ -65,7 +67,7 @@ function handleMultipartUpload(req, res, next) {
         if (err) {
             const tooBig = err.code === 'LIMIT_FILE_SIZE';
             return res.status(tooBig ? 413 : 400).json({
-                error: tooBig ? 'File is too large. Maximum size is 4MB.' : (err.message || 'Upload failed'),
+                error: tooBig ? `File is too large. Maximum size is ${MAX_UPLOAD_MB}MB.` : (err.message || 'Upload failed'),
             });
         }
         next();
