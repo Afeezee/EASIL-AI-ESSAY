@@ -1,61 +1,101 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
-import fs from 'node:fs';
-import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { query } from '../db.js';
 import { invokeLLM } from '../services/llm.js';
-import { extractDocumentText } from '../services/pdf.js';
+import { extractTextFromBuffer } from '../services/pdf.js';
 import { gradeShortAnswers, gradeEssay } from '../services/grading.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_DIR = path.resolve(__dirname, '..', '..', 'uploads');
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-    filename: (_req, file, cb) => {
-        const ext = path.extname(file.originalname) || '';
-        cb(null, `${crypto.randomUUID()}${ext}`);
-    },
-});
-const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
+// In-memory storage: the file never touches disk, so this works identically on
+// a local server and on stateless serverless hosts. Vercel caps a serverless
+// request body at ~4.5MB, so keep the limit under that.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 const supportedExtensions = ['.pdf', '.doc', '.docx', '.txt', '.md', '.json'];
 
 const router = Router();
 
-// POST /api/integrations/upload  (multipart field: "file")  -> { file_url }
-router.post('/upload', upload.single('file'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded (expected field "file")' });
+// Multer errors (e.g. file too large) arrive as errors on this handler.
+function handleUpload(req, res, next) {
+    upload.single('file')(req, res, (err) => {
+        if (err) {
+            const tooBig = err.code === 'LIMIT_FILE_SIZE';
+            return res.status(tooBig ? 413 : 400).json({
+                error: tooBig ? 'File is too large. Maximum size is 4MB.' : (err.message || 'Upload failed'),
+            });
+        }
+        next();
+    });
+}
 
-    const ext = path.extname(req.file.originalname).toLowerCase();
-    if (!supportedExtensions.includes(ext)) {
-        return res.status(415).json({ error: `Unsupported file type: ${ext || 'unknown'}` });
+// POST /api/integrations/upload  (multipart field: "file")
+// Extracts the text NOW and stores it in Postgres. Returns a file_url that
+// references the stored document by id (no filesystem involved).
+router.post('/upload', handleUpload, async (req, res, next) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded (expected field "file")' });
+
+        const ext = path.extname(req.file.originalname).toLowerCase();
+        if (!supportedExtensions.includes(ext)) {
+            return res.status(415).json({ error: `Unsupported file type: ${ext || 'unknown'}` });
+        }
+
+        const content = await extractTextFromBuffer(req.file.buffer, ext);
+        if (!content) {
+            return res.status(422).json({ error: 'Could not read any text from this document. If it is a scanned PDF, it needs OCR.' });
+        }
+
+        const { rows } = await query(
+            `INSERT INTO documents (file_name, file_type, content, created_by)
+             VALUES ($1, $2, $3, $4) RETURNING id`,
+            [req.file.originalname, ext.replace('.', ''), content, req.user?.email || null]
+        );
+
+        // Relative URL keeps it origin-agnostic (same-origin on Vercel, proxied locally).
+        const file_url = `/api/integrations/file/${rows[0].id}`;
+        res.status(201).json({ file_url, file_name: req.file.originalname, file_type: ext.replace('.', '') });
+    } catch (err) {
+        console.error('[upload] error:', err.message);
+        next(err);
     }
-
-    const publicUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 4000}`;
-    const file_url = `${publicUrl}/uploads/${req.file.filename}`;
-    res.status(201).json({ file_url, file_name: req.file.originalname, file_type: ext.replace('.', '') });
 });
 
-// POST /api/integrations/extract  { file_url, json_schema } -> { status, output: { content } }
-router.post('/extract', async (req, res, next) => {
+// Resolve a stored document id from a file_url (accepts the id itself or a path
+// ending in the id).
+function documentIdFromUrl(fileUrl) {
+    try {
+        return path.basename(new URL(fileUrl, 'http://local').pathname);
+    } catch {
+        return path.basename(String(fileUrl));
+    }
+}
+
+// POST /api/integrations/extract  { file_url } -> { status, output: { content } }
+// Reads the already-extracted text back from Postgres.
+router.post('/extract', async (req, res) => {
     try {
         const { file_url } = req.body || {};
         if (!file_url) return res.status(400).json({ status: 'error', error: 'file_url is required' });
 
-        // Resolve local file from the URL we handed out. Guard against path traversal.
-        const filename = path.basename(new URL(file_url, 'http://local').pathname);
-        const filePath = path.join(UPLOAD_DIR, filename);
-        if (!filePath.startsWith(UPLOAD_DIR) || !fs.existsSync(filePath)) {
-            return res.status(404).json({ status: 'error', error: 'File not found' });
-        }
+        const id = documentIdFromUrl(file_url);
+        const { rows } = await query('SELECT content FROM documents WHERE id = $1', [id]);
+        if (!rows[0]) return res.status(404).json({ status: 'error', error: 'Document not found' });
 
-        const content = await extractDocumentText(filePath);
-        res.json({ status: 'success', output: { content } });
+        res.json({ status: 'success', output: { content: rows[0].content } });
     } catch (err) {
         console.error('[extract] error:', err.message);
-        res.json({ status: 'error', error: 'Failed to extract content from file' });
+        res.status(500).json({ status: 'error', error: 'Failed to extract content from file' });
+    }
+});
+
+// GET /api/integrations/file/:id -> raw extracted text (handy for debugging).
+router.get('/file/:id', async (req, res) => {
+    try {
+        const { rows } = await query('SELECT content, file_name FROM documents WHERE id = $1', [req.params.id]);
+        if (!rows[0]) return res.status(404).json({ error: 'Document not found' });
+        res.type('text/plain').send(rows[0].content);
+    } catch (err) {
+        console.error('[file] error:', err.message);
+        res.status(500).json({ error: 'Failed to load document' });
     }
 });
 

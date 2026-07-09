@@ -1,18 +1,14 @@
 import pkg from 'pg';
 import { Pool as NeonPool, neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { SCHEMA_SQL } from './schema.js';
 
 const { Pool } = pkg;
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-if (!process.env.DATABASE_URL) {
-    console.error('FATAL: DATABASE_URL is not set. Copy server/.env.example to server/.env and fill it in.');
-    process.exit(1);
-}
-
+// Note: we do NOT process.exit() here if DATABASE_URL is missing. On serverless
+// that would hard-kill the function; instead every query rejects with a clear
+// message and app.js turns it into a 503. The local entrypoint (index.js)
+// surfaces the same rejection at startup.
 const useSsl = String(process.env.DATABASE_SSL).toLowerCase() === 'true';
 
 // Strip SSL-negotiation params from the URL and drive SSL via the `ssl` option instead.
@@ -28,11 +24,17 @@ function sanitizeConnectionString(raw) {
     }
 }
 
-const connectionString = sanitizeConnectionString(process.env.DATABASE_URL);
-const isNeon = /\.neon\.tech/i.test(connectionString);
+const connectionString = process.env.DATABASE_URL
+    ? sanitizeConnectionString(process.env.DATABASE_URL)
+    : null;
+const isNeon = !!connectionString && /\.neon\.tech/i.test(connectionString);
 
 let poolInstance;
-if (isNeon) {
+if (!connectionString) {
+    // No DB configured: every query rejects with a clear, actionable message.
+    const reject = () => Promise.reject(new Error('DATABASE_URL is not set. Configure it in the environment.'));
+    poolInstance = { query: reject, end: async () => {} };
+} else if (isNeon) {
     // Neon: use the official serverless driver, which tunnels Postgres over
     // WebSockets on port 443. This works on networks that block/reset raw
     // Postgres traffic on port 5432 (a common cause of ECONNRESET on startup).
@@ -50,9 +52,22 @@ export const pool = poolInstance;
 
 export const query = (text, params) => pool.query(text, params);
 
-// Runs schema.sql. Idempotent (all statements use IF NOT EXISTS).
-export async function runMigrations() {
-    const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-    await pool.query(sql);
-    console.log('[db] schema ready');
+// Ensure the schema exists. Idempotent (every statement uses IF NOT EXISTS).
+// The promise is cached so concurrent requests on a warm serverless instance
+// share one migration run instead of racing.
+let schemaPromise = null;
+export function ensureSchema() {
+    if (!schemaPromise) {
+        schemaPromise = pool
+            .query(SCHEMA_SQL)
+            .then(() => console.log('[db] schema ready'))
+            .catch((err) => {
+                schemaPromise = null; // allow a retry on the next request
+                throw err;
+            });
+    }
+    return schemaPromise;
 }
+
+// Backwards-compatible alias for the local server entrypoint.
+export const runMigrations = ensureSchema;

@@ -43,17 +43,43 @@ the same `base44.entities / .auth / .integrations` shape, so `api/entities.js`,
 
 ---
 
-## Vercel deployment (GitHub)
+## Vercel deployment (single project: frontend + backend)
 
-This app is already structured for a Vercel frontend deployment from a GitHub repository:
+Both the frontend **and** the backend deploy from this one repo on Vercel. The Express
+backend runs as a serverless function (`api/index.js`), so uploads, grading, auth, and the
+database all work on Vercel with no separate backend host.
 
+How it fits together:
+- The static frontend is built to `dist/` and served by Vercel.
+- `vercel.json` rewrites every `/api/*` request to the serverless function in `api/index.js`,
+  which mounts the full Express app from `server/src/app.js`.
+- Backend runtime dependencies are listed in the **root** `package.json` (Vercel only runs
+  `npm install` at the root), so the function can resolve them.
+- Uploaded documents are **not** written to disk — text is extracted on upload and stored in
+  Postgres (`documents` table), so it survives stateless serverless invocations.
+
+Steps:
 1. Push the repository to GitHub.
-2. In Vercel, create a new project and import the repository.
-3. Use the repository root as the Root Directory, keep the build command as `npm run build`, and keep the output directory as `dist`.
-4. In Project Settings → Environment Variables, add `VITE_API_URL` and set it to your deployed backend URL (for example, a Render/Railway/Fly.io URL).
-5. Deploy the project and confirm the frontend loads correctly.
+2. In Vercel, **New Project → Import** the repo. Keep the defaults (root directory `.`,
+   build `npm run build`, output `dist`) — `vercel.json` already configures everything.
+3. In **Project Settings → Environment Variables**, add:
+   - `DATABASE_URL` — your Neon/Postgres connection string
+   - `JWT_SECRET` — a long random string
+   - `GROQ_API_KEY` — your Groq key
+   - `GROQ_MODEL` *(optional)* — defaults to `llama-3.3-70b-versatile`
+   - Leave `VITE_API_URL` **unset** — the frontend calls same-origin `/api` automatically.
+4. Deploy. The schema is created automatically on the first API request.
+5. Verify: open `https://<your-app>.vercel.app/api/health` → `{"ok":true}`, then sign up and
+   create an assessment.
 
-If you are using the self-hosted backend from this repo, deploy that separately and point the frontend to it with `VITE_API_URL`.
+**Note on upload size:** Vercel caps a serverless request body at ~4.5MB, so uploads are
+limited to 4MB. For larger source documents, either run the backend on a long-lived host
+(Render/Railway/Fly.io) and set `VITE_API_URL` to it, or add Vercel Blob for direct uploads.
+
+### Alternative: split hosting
+Prefer the frontend on Vercel and the backend elsewhere? Deploy `server/` to
+Render/Railway/Fly.io, set the frontend's `VITE_API_URL` to that backend URL, and set the
+backend's `CORS_ORIGIN` to the Vercel frontend URL.
 
 ## Local setup
 
