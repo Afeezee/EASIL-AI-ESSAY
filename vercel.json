@@ -6,11 +6,12 @@
   "installCommand": "npm install",
   "devCommand": "npm run dev",
   "functions": {
-    "api/[...path].js": {
+    "api/index.js": {
       "maxDuration": 60
     }
   },
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
