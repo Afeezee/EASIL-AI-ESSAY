@@ -163,11 +163,17 @@ const Core = {
         request('/api/integrations/extract', { method: 'POST', body: { file_url, json_schema } }),
 
     // Guardrailed, server-side grading (prompts and score clamping live on the server).
-    GradeShortAnswers: ({ items }) =>
-        request('/api/integrations/grade-short-answers', { method: 'POST', body: { items } }),
+    GradeShortAnswers: ({ items, source_material, marking_guide, global_grading_rubric }) =>
+        request('/api/integrations/grade-short-answers', {
+            method: 'POST',
+            body: { items, source_material, marking_guide, global_grading_rubric },
+        }),
 
-    GradeEssay: ({ question, rubric, max_score, answer }) =>
-        request('/api/integrations/grade-essay', { method: 'POST', body: { question, rubric, max_score, answer } }),
+    GradeEssay: ({ question, rubric, max_score, answer, source_material, marking_guide, global_grading_rubric }) =>
+        request('/api/integrations/grade-essay', {
+            method: 'POST',
+            body: { question, rubric, max_score, answer, source_material, marking_guide, global_grading_rubric },
+        }),
 
     // Unused by EASIL today — stubbed so imports never crash.
     SendEmail: notImplemented('SendEmail'),

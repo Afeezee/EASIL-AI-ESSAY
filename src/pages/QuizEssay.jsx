@@ -169,7 +169,10 @@ export default function QuizEssay() {
                     question: question.question,
                     rubric: question.rubric,
                     max_score: question.max_score || 10,
-                    answer: answerText
+                    answer: answerText,
+                    source_material: quiz?.source_material,
+                    marking_guide: quiz?.marking_guide,
+                    global_grading_rubric: quiz?.global_grading_rubric
                 });
             }
 

@@ -191,23 +191,25 @@ router.post('/invoke-llm', async (req, res, next) => {
 });
 
 // POST /api/integrations/grade-short-answers
-// { items: [{ question_id, question, expected_key_points, student_answer }] }
+// { items: [{ question_id, question, expected_key_points, student_answer }],
+//   source_material?, marking_guide?, global_grading_rubric? }
 // -> { results: [{ question_id, score (0..1), is_correct, feedback }] }
 // Grading prompts + guardrails live server-side so clients cannot weaken them.
 router.post('/grade-short-answers', async (req, res, next) => {
     try {
-        const results = await gradeShortAnswers(req.body?.items);
+        const { items, source_material, marking_guide, global_grading_rubric } = req.body || {};
+        const results = await gradeShortAnswers(items, { source_material, marking_guide, global_grading_rubric });
         res.json({ results });
     } catch (err) { next(err); }
 });
 
 // POST /api/integrations/grade-essay
-// { question, rubric, max_score, answer }
+// { question, rubric, max_score, answer, source_material?, marking_guide?, global_grading_rubric? }
 // -> { score (0..max_score), feedback, criteria_breakdown[] }
 router.post('/grade-essay', async (req, res, next) => {
     try {
-        const { question, rubric, max_score, answer } = req.body || {};
-        const result = await gradeEssay({ question, rubric, max_score, student_answer: answer });
+        const { question, rubric, max_score, answer, source_material, marking_guide, global_grading_rubric } = req.body || {};
+        const result = await gradeEssay({ question, rubric, max_score, student_answer: answer, source_material, marking_guide, global_grading_rubric });
         res.json(result);
     } catch (err) { next(err); }
 });

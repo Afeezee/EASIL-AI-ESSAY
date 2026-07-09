@@ -61,22 +61,31 @@ export default function QuizTake() {
                 student_answer: (finalAnswers[question.id] || "").trim()
             }));
 
-            const { results } = await GradeShortAnswers({ items });
+            const { results } = await GradeShortAnswers({
+                items,
+                source_material: quiz.source_material,
+                marking_guide: quiz.marking_guide,
+                global_grading_rubric: quiz.global_grading_rubric
+            });
 
             const gradedAnswers = quiz.questions.map(question => {
                 const graded = results.find(r => r.question_id === question.id) || {};
+                // The rubric/marking guide can specify a question's total achievable
+                // score; absent that detail, a short-answer question defaults to 1.
+                const maxScore = question.max_score || 1;
+                const fraction = typeof graded.score === 'number' ? graded.score : 0;
                 return {
                     question_id: question.id,
                     answer: finalAnswers[question.id] || "",
                     is_correct: !!graded.is_correct,
-                    score: typeof graded.score === 'number' ? graded.score : 0,
-                    max_score: 1,
+                    score: Math.round(fraction * maxScore * 100) / 100,
+                    max_score: maxScore,
                     feedback: graded.feedback || "No answer provided"
                 };
             });
 
             const totalScore = gradedAnswers.reduce((sum, a) => sum + a.score, 0);
-            const maxScore = gradedAnswers.length;
+            const maxScore = gradedAnswers.reduce((sum, a) => sum + a.max_score, 0);
             const endTime = new Date();
 
             const attemptData = {
