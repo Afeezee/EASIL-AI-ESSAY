@@ -12,7 +12,20 @@ const isLocalHost = (hostname) => ['localhost', '127.0.0.1', '::1'].includes(hos
 const defaultApiUrl = typeof window !== 'undefined' && !isLocalHost(window.location.hostname)
     ? ''
     : 'http://localhost:4000';
-const API_URL = (import.meta.env.VITE_API_URL || defaultApiUrl).replace(/\/$/, '');
+
+// Normalize whatever VITE_API_URL the deploy provides so a common misconfig
+// can't break requests. Notably: a bare domain like
+// "my-app.up.railway.app" (no scheme) would otherwise be treated by the
+// browser as a RELATIVE path and get appended to the current URL. Empty means
+// same-origin relative requests (the recommended single-origin setup).
+function normalizeApiUrl(raw) {
+    let url = (raw ?? '').trim().replace(/\/+$/, '');
+    if (!url) return '';
+    if (url.startsWith('/')) return url;                 // relative path, keep as-is
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`; // add missing scheme
+    return url;
+}
+const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL || defaultApiUrl);
 const TOKEN_KEY = 'easil_token';
 const USER_KEY = 'easil_user';
 
