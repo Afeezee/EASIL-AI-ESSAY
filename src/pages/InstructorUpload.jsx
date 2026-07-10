@@ -129,6 +129,7 @@ For each question, provide:
 2. For Short Answer: the correct_answer field must be a complete model answer listing EVERY key point required for full marks, phrased as distinct concepts (separated by semicolons), including common synonyms students might use
 3. For Essay: a rubric with 3-5 NUMBERED criteria, each with an explicit point allocation that sums exactly to max_score (e.g. "1. Defines X correctly (3 points); 2. Explains the mechanism of Y (4 points); 3. Gives a relevant example (3 points)")
 4. A brief explanation of the correct answer that a student can learn from
+5. max_score: unless the marking guide above explicitly assigns a different point value to that specific question, set max_score to exactly 1 for every Short Answer question and exactly 10 for every Essay question
 
 Quality requirements:
 - Questions must test understanding and application, not just memorization
